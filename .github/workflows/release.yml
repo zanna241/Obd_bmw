@@ -2,6 +2,7 @@ name: Build BMW OBD firmware
 
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -30,5 +31,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            release/BMW_520xd_MONITOR_V0992_STABILITY.bin
+            release/BMW_520xd_MONITOR_V0992_STABILITY.bin.sha256
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BMW_520xd_MONITOR_V0992_STABILITY
+          path: |
             release/BMW_520xd_MONITOR_V0992_STABILITY.bin
             release/BMW_520xd_MONITOR_V0992_STABILITY.bin.sha256
