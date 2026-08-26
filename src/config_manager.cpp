@@ -1,0 +1,5 @@
+#include "config_manager.h"
+#include "alarm_manager.h"
+static bool rf(const String&j,const char*k,float&o){String t="\""+String(k)+"\"";int p=j.indexOf(t);if(p<0)return false;p=j.indexOf(':',p+t.length());if(p<0)return false;int s=p+1;while(s<(int)j.length()&&isspace(j[s]))s++;int e=s;while(e<(int)j.length()&&(isdigit(j[e])||j[e]=='.'||j[e]=='-'))e++;if(e==s)return false;o=j.substring(s,e).toFloat();return true;}
+String config_export_json(){String j="{";j+="\"version\":1,";j+="\"alarm_coolant\":"+String(alarm_limit_coolant(),1)+",";j+="\"alarm_oil\":"+String(alarm_limit_oil(),1)+",";j+="\"alarm_gearbox\":"+String(alarm_limit_gearbox(),1)+",";j+="\"alarm_dpf\":"+String(alarm_limit_dpf(),1);j+="}";return j;}
+bool config_import_json(const String&j,String&e){float c,o,g,d;if(!rf(j,"alarm_coolant",c)||!rf(j,"alarm_oil",o)||!rf(j,"alarm_gearbox",g)||!rf(j,"alarm_dpf",d)){e="Campi configurazione mancanti";return false;}if(c<80||c>140||o<80||o>170||g<60||g>150||d<300||d>1000){e="Valori fuori range";return false;}alarm_set_limits(c,o,g,d);return true;}
