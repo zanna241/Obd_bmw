@@ -1,13 +1,14 @@
-# Stato release V0.9.9.2 STABILITY
+# Stato release V0.9.9.4 OTA RECOVERY
 
 - Sorgente: pronto
-- Versione: 0.9.9.2
+- Versione: 0.9.9.4
 - Ambiente PlatformIO: `jc3248w535`
 - Pin CAN: TX GPIO17 / RX GPIO18
-- BIN GitHub Actions: generato e verificato
-- Dimensione BIN: 1.940.832 byte
-- SHA-256 BIN: `a25f8fa6bb45839039103fecf78c2e212a07051e00581bf7d72feae92b22060b`
-- Build validata: GitHub Actions run 33023327269
+- BIN GitHub Actions: in attesa di compilazione
+- Dimensione BIN: da verificare
+- SHA-256 BIN: da verificare
+- Build validata: in attesa
+- Modalita banco: comando touch persistente `DEEP SLEEP CAN` (`AUTO CAN` / `BANCO`)
 - Build locale non necessaria: il core Arduino ESP32 e stato risolto da GitHub Actions
 - Build automatica GitHub: `.github/workflows/release.yml`
 
