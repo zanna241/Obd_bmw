@@ -14,6 +14,7 @@
 #include "splash.h"
 #include "display_settings.h"
 #include "power_manager.h"
+#include "online_ota.h"
 
 void setup()
 {
@@ -22,8 +23,8 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" BMW 520xd MONITOR V0.9.9.4 OTA RECOVERY");
-    Serial.println(" NATIVE OTA / DEVICE AUTH / BENCH MODE");
+    Serial.println(" BMW 520xd MONITOR V0.9.9.5 ONLINE OTA");
+    Serial.println(" TOUCH UPDATE / SHA256 VERIFY / OTA RECOVERY");
     Serial.println("======================================");
 
     // Must run before TWAI setup after a deep-sleep EXT1 wake.
@@ -54,6 +55,7 @@ void setup()
     // Bring networking up first so AP/web remain responsive even if CAN is faulty.
     wifi_manager_begin();
     web_server_begin();
+    online_ota_begin();
 
     can_init();
 
