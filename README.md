@@ -1,4 +1,4 @@
-# BMW 520xd Monitor V0.9.9.4 OTA RECOVERY
+# BMW 520xd Monitor V0.9.9.5 ONLINE OTA
 
 Release di stabilita derivata dalla V0.9.9.1 AUDIT e verificata sui log reali
 del 26 agosto 2026.
@@ -12,6 +12,12 @@ La V0.9.9.4 sostituisce l'upload AJAX con una pagina OTA nativa dedicata,
 compatibile con Chrome su iPhone e priva del polling della dashboard durante il
 trasferimento. Elimina inoltre la password fissa: la protezione web si configura
 per dispositivo e puo essere disattivata consapevolmente.
+
+La V0.9.9.5 aggiunge il controllo aggiornamenti direttamente dal display touch.
+La schermata IMPOSTAZIONI usa ora una griglia 2 x 3 con pulsanti piu grandi.
+Il dispositivo legge il manifest pubblico GitHub, chiede conferma prima del
+download, mostra l'avanzamento, verifica dimensione e SHA-256 e riavvia solo
+dopo `Update.end(true)` riuscito.
 
 ## Modifiche principali
 
@@ -43,5 +49,10 @@ per dispositivo e puo essere disattivata consapevolmente.
 - autenticazione web persistente con utente `admin` e password personale;
 - possibilita di disattivare l'autenticazione dalla pagina SISTEMA;
 - primo avvio V0.9.9.4 senza password, per consentire la configurazione iniziale.
+- IMPOSTAZIONI in due colonne con sei grandi aree touch;
+- controllo versione online dal display;
+- conferma `SCARICA E INSTALLA` oppure `ANNULLA`;
+- download progressivo con verifica dimensione e SHA-256;
+- pubblicazione automatica di `firmware/manifest.json` e del BIN dopo la build di `main`.
 
-Vedere `docs/V0994_OTA_RECOVERY.md` per dettagli e procedura di prova.
+Vedere `docs/V0995_ONLINE_OTA.md` per dettagli e procedura di prova.
