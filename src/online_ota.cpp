@@ -13,9 +13,10 @@
 static const char *MANIFEST_URL =
     "https://raw.githubusercontent.com/zanna241/Obd_bmw/main/firmware/manifest.json";
 
-// DigiCert Global Root G2, valid until 15 January 2038. GitHub's raw content
-// TLS chain is verified against this CA; never replace this with setInsecure().
-static const char GITHUB_ROOT_CA[] PROGMEM = R"PEM(-----BEGIN CERTIFICATE-----
+// GitHub can serve raw content through either the RSA (G2) or ECC (G3)
+// DigiCert hierarchy, depending on the edge reached by the device. Keep both
+// trusted roots in one mbedTLS bundle; never replace this with setInsecure().
+static const char GITHUB_CA_BUNDLE[] PROGMEM = R"PEM(-----BEGIN CERTIFICATE-----
 MIIDjjCCAnagAwIBAgIQAzrx5qcRqaC7KGSxHQn65TANBgkqhkiG9w0BAQsFADBh
 MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
 d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBH
@@ -36,7 +37,30 @@ Fdtom/DzMNU+MeKNhJ7jitralj41E6Vf8PlwUHBHQRFXGU7Aj64GxJUTFy8bJZ91
 8rGOmaFvE7FBcf6IKshPECBV1/MUReXgRPTqh5Uykw7+U0b6LJ3/iyK5S9kJRaTe
 pLiaWN0bfVKfjllDiIGknibVb63dDcY3fe0Dkhvld1927jyNxF1WW6LZZm6zNTfl
 MrY=
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIICPzCCAcWgAwIBAgIQBVVWvPJepDU1w6QP1atFcjAKBggqhkjOPQQDAzBhMQsw
+CQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cu
+ZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBHMzAe
+Fw0xMzA4MDExMjAwMDBaFw0zODAxMTUxMjAwMDBaMGExCzAJBgNVBAYTAlVTMRUw
+EwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20x
+IDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMHYwEAYHKoZIzj0CAQYF
+K4EEACIDYgAE3afZu4q4C/sLfyHS8L6+c/MzXRq8NOrexpu80JX28MzQC7phW1FG
+fp4tn+6OYwwX7Adw9c+ELkCDnOg/QW07rdOkFFk2eJ0DQ+4QE2xy3q6Ip6FrtUPO
+Z9wj/wMco+I+o0IwQDAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAd
+BgNVHQ4EFgQUs9tIpPmhxdiuNkHMEWNpYim8S8YwCgYIKoZIzj0EAwMDaAAwZQIx
+AK288mw/EkrRLTnDCgmXc/SINoyIJ7vmiI1Qhadj+Z4y3maTD/HMsQmP3Wyr+mt/
+oAIwOWZbwmSNuJ5Q3KjVSaLtx9zRSX8XAbjIho9OjIgrqJqpisXRAL34VOKa5Vt8
+sycX
 -----END CERTIFICATE-----)PEM";
+
+static String httpFailure(const char *phase, int code)
+{
+    String out = String(phase) + " " + String(code);
+    String detail = HTTPClient::errorToString(code);
+    if (detail.length()) out += " " + detail;
+    return out;
+}
 
 static String jsonString(const String &json, const char *key)
 {
@@ -99,8 +123,15 @@ bool online_ota_check(OnlineOtaInfo &info)
         return false;
     }
 
+    IPAddress resolved;
+    if (!WiFi.hostByName("raw.githubusercontent.com", resolved)) {
+        info.error = "DNS GitHub non risolto";
+        return false;
+    }
+
     WiFiClientSecure client;
-    client.setCACert(GITHUB_ROOT_CA);
+    client.setCACert(GITHUB_CA_BUNDLE);
+    client.setHandshakeTimeout(20);
     client.setTimeout(12);
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
@@ -109,9 +140,13 @@ bool online_ota_check(OnlineOtaInfo &info)
         info.error = "Impossibile aprire il server aggiornamenti";
         return false;
     }
-    int code = http.GET();
+    int code = HTTP_ERROR_CONNECTION_REFUSED;
+    for (int attempt = 0; attempt < 3 && code < 0; ++attempt) {
+        code = http.GET();
+        if (code < 0 && attempt < 2) delay(350);
+    }
     if (code != HTTP_CODE_OK) {
-        info.error = "Manifest HTTP " + String(code);
+        info.error = httpFailure("Manifest", code);
         http.end();
         return false;
     }
@@ -143,14 +178,15 @@ bool online_ota_install(const OnlineOtaInfo &info, OnlineOtaProgress progress, S
     if (logger_active()) logger_stop();
 
     WiFiClientSecure client;
-    client.setCACert(GITHUB_ROOT_CA);
+    client.setCACert(GITHUB_CA_BUNDLE);
+    client.setHandshakeTimeout(20);
     client.setTimeout(15);
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(15000);
     if (!http.begin(client, info.url)) { error = "Connessione download fallita"; return false; }
     int code = http.GET();
-    if (code != HTTP_CODE_OK) { error = "Download HTTP " + String(code); http.end(); return false; }
+    if (code != HTTP_CODE_OK) { error = httpFailure("Download", code); http.end(); return false; }
     int announced = http.getSize();
     if (announced > 0 && (size_t)announced != info.size) {
         error = "Dimensione download diversa dal manifest"; http.end(); return false;
