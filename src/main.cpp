@@ -22,8 +22,8 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" BMW 520xd MONITOR V0.9.9.2 STABILITY");
-    Serial.println(" SD/WEB STALL GUARD / BMW DISCOVERY");
+    Serial.println(" BMW 520xd MONITOR V0.9.9.3 BENCH");
+    Serial.println(" BENCH MODE / SD-WEB STABILITY / BMW DISCOVERY");
     Serial.println("======================================");
 
     // Must run before TWAI setup after a deep-sleep EXT1 wake.

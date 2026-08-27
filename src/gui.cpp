@@ -10,6 +10,7 @@
 #include "alarm_manager.h"
 #include "time_manager.h"
 #include "display_settings.h"
+#include "power_manager.h"
 #include <cstring>
 
 static const int UI_W = 480;
@@ -56,6 +57,7 @@ static lv_obj_t *touchDot = nullptr;
 static lv_obj_t *touchCoord = nullptr;
 static lv_obj_t *touchCountLabel = nullptr;
 static lv_obj_t *loggerStatus = nullptr;
+static lv_obj_t *powerModeStatus = nullptr;
 static lv_obj_t *wifiOverlay = nullptr;
 static lv_obj_t *displayOverlay = nullptr;
 static lv_obj_t *daySlider = nullptr;
@@ -692,6 +694,17 @@ static void logger_event(lv_event_t *e)
     }
 }
 
+static void power_mode_event(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    power_set_can_sleep_enabled(!power_can_sleep_enabled());
+    if (powerModeStatus) {
+        bool automatic = power_can_sleep_enabled();
+        lv_label_set_text(powerModeStatus, automatic ? "AUTO CAN" : "BANCO");
+        lv_obj_set_style_text_color(powerModeStatus, automatic ? GREEN() : YELLOW(), 0);
+    }
+}
+
 static void touch_test_event(lv_event_t *e)
 {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
@@ -704,15 +717,15 @@ static lv_obj_t *menu_button(lv_obj_t *parent, const char *title,
 {
     lv_obj_t *b = lv_button_create(parent);
     lv_obj_set_pos(b, 22, y);
-    lv_obj_set_size(b, 436, 56);
+    lv_obj_set_size(b, 436, 48);
     lv_obj_set_style_bg_color(b, PANEL(), 0);
     lv_obj_set_style_border_color(b, LINE(), 0);
     lv_obj_set_style_border_width(b, 1, 0);
     lv_obj_set_style_radius(b, 8, 0);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
 
-    L(b, title, 18, 7, &lv_font_montserrat_16, TEXT());
-    L(b, subtitle, 18, 29, &lv_font_montserrat_14, MUTED());
+    L(b, title, 18, 4, &lv_font_montserrat_16, TEXT());
+    L(b, subtitle, 18, 25, &lv_font_montserrat_14, MUTED());
 
     lv_obj_t *arrow = lv_label_create(b);
     lv_label_set_text(arrow, ">");
@@ -1158,7 +1171,7 @@ static void build_settings_overlay(lv_obj_t *root)
         settingsOverlay,
         "WI-FI",
         "Scansiona reti e configura connessione",
-        64,
+        58,
         wifi_open_event
     );
 
@@ -1166,7 +1179,7 @@ static void build_settings_overlay(lv_obj_t *root)
         settingsOverlay,
         "DATA LOGGER",
         "Abilita/disabilita registrazione dati",
-        126,
+        109,
         logger_event
     );
 
@@ -1180,15 +1193,29 @@ static void build_settings_overlay(lv_obj_t *root)
         settingsOverlay,
         "DISPLAY",
         "Luminosita e tema giorno/notte",
-        188,
+        160,
         display_open_event
     );
+
+    lv_obj_t *powerMode = menu_button(
+        settingsOverlay,
+        "DEEP SLEEP CAN",
+        "Disabilita per testare il monitor a banco",
+        211,
+        power_mode_event
+    );
+
+    powerModeStatus = lv_label_create(powerMode);
+    lv_label_set_text(powerModeStatus, power_can_sleep_enabled() ? "AUTO CAN" : "BANCO");
+    lv_obj_set_style_text_font(powerModeStatus, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(powerModeStatus, power_can_sleep_enabled() ? GREEN() : YELLOW(), 0);
+    lv_obj_align(powerModeStatus, LV_ALIGN_RIGHT_MID, -40, -10);
 
     menu_button(
         settingsOverlay,
         "RIAVVIA SCHEDA",
         "Riavvio software completo; chiude prima il logger",
-        250,
+        262,
         reboot_board_event
     );
 
@@ -1282,6 +1309,7 @@ static void reset_gui_refs()
     wifiClientsLabel=nullptr; canLabel=nullptr; clockLabel=nullptr;
     alarmOverlay=nullptr; alarmTitle=nullptr; alarmMessage=nullptr;
     settingsOverlay=nullptr; touchOverlay=nullptr; touchDot=nullptr; touchCoord=nullptr;
+    powerModeStatus=nullptr;
     touchCountLabel=nullptr; loggerStatus=nullptr; wifiOverlay=nullptr;
     displayOverlay=nullptr; daySlider=nullptr; nightSlider=nullptr;
     dayValueLabel=nullptr; nightValueLabel=nullptr; themeStatusLabel=nullptr;
@@ -1573,6 +1601,11 @@ void gui_update()
                 loggerEnabled ? GREEN() : MUTED(),
                 0
             );
+        }
+        if (powerModeStatus) {
+            bool automatic = power_can_sleep_enabled();
+            lv_label_set_text(powerModeStatus, automatic ? "AUTO CAN" : "BANCO");
+            lv_obj_set_style_text_color(powerModeStatus, automatic ? GREEN() : YELLOW(), 0);
         }
     }
 }
