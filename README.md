@@ -1,4 +1,4 @@
-# BMW 520xd Monitor V0.9.9.3 BENCH
+# BMW 520xd Monitor V0.9.9.4 OTA RECOVERY
 
 Release di stabilita derivata dalla V0.9.9.1 AUDIT e verificata sui log reali
 del 26 agosto 2026.
@@ -7,6 +7,11 @@ La V0.9.9.3 aggiunge la modalita banco persistente: dal display touch si puo
 disabilitare il deep sleep automatico legato all'assenza CAN.
 In modalita banco la retroilluminazione resta attiva, mentre i dati motore non
 piu aggiornati continuano a essere invalidati per evitare valori falsi.
+
+La V0.9.9.4 sostituisce l'upload AJAX con una pagina OTA nativa dedicata,
+compatibile con Chrome su iPhone e priva del polling della dashboard durante il
+trasferimento. Elimina inoltre la password fissa: la protezione web si configura
+per dispositivo e puo essere disattivata consapevolmente.
 
 ## Modifiche principali
 
@@ -34,5 +39,9 @@ piu aggiornati continuano a essere invalidati per evitare valori falsi.
 - arresto e chiusura pulita del logger prima di un aggiornamento OTA;
 - discovery BMW estesa mantenuta per EGS/ZF8, GWS e KOMBI;
 - pinout CAN definitivo: TX GPIO17, RX GPIO18, MCP2562FD.
+- pagina `/ota` minimale con form multipart nativo, senza XMLHttpRequest;
+- autenticazione web persistente con utente `admin` e password personale;
+- possibilita di disattivare l'autenticazione dalla pagina SISTEMA;
+- primo avvio V0.9.9.4 senza password, per consentire la configurazione iniziale.
 
-Vedere `docs/V0992_STABILITY.md` per dettagli e procedura di prova.
+Vedere `docs/V0994_OTA_RECOVERY.md` per dettagli e procedura di prova.
