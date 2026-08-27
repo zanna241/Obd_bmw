@@ -101,10 +101,6 @@ static bool getManifestAttempt(String &body, String &error)
 {
     WiFiClientSecure client;
     client.setCACert(GITHUB_CA_BUNDLE);
-    // LVGL, frame buffers and the web server are already active while this
-    // dialog is open. Smaller TLS I/O buffers avoid handshake failures caused
-    // by a missing large contiguous block of internal RAM.
-    client.setBufferSizes(4096, 1024);
     client.setHandshakeTimeout(25);
     client.setTimeout(15);
 
@@ -233,7 +229,6 @@ bool online_ota_install(const OnlineOtaInfo &info, OnlineOtaProgress progress, S
 
     WiFiClientSecure client;
     client.setCACert(GITHUB_CA_BUNDLE);
-    client.setBufferSizes(4096, 1024);
     client.setHandshakeTimeout(20);
     client.setTimeout(15);
     HTTPClient http;
