@@ -6,6 +6,7 @@
 #include "can.h"
 #include <esp_sleep.h>
 #include <driver/rtc_io.h>
+#include <Preferences.h>
 
 static constexpr uint32_t DATA_STALE_MS = 5000;
 static constexpr uint32_t BACKLIGHT_OFF_MS = 10000;
@@ -15,6 +16,8 @@ static uint32_t offlineSince = 0;
 static bool dataCleared = false;
 static bool backlightOff = false;
 static String state = "ACTIVE";
+static Preferences powerPrefs;
+static bool canSleepEnabled = true;
 
 static void enter_sleep(){
     state="SLEEP PREP";
@@ -33,6 +36,8 @@ static void enter_sleep(){
 }
 
 void power_manager_begin(){
+    powerPrefs.begin("bmwpower", false);
+    canSleepEnabled = powerPrefs.getBool("canSleep", true);
     auto cause=esp_sleep_get_wakeup_cause();
 
     // EXT1 wake leaves the wake pin under RTC IO control on ESP32-S3.
@@ -70,6 +75,15 @@ void power_manager_loop(){
         dataCleared=true;
     }
 
+    // Bench mode: keep the display usable without a vehicle CAN bus. Live
+    // values are still invalidated above, but automatic backlight-off and
+    // deep sleep are bypassed until the user restores AUTO CAN mode.
+    if(!canSleepEnabled){
+        state="BENCH TEST / DEEP SLEEP OFF";
+        if(backlightOff){ display_set_backlight(true); backlightOff=false; }
+        return;
+    }
+
     // BMW can keep the gateway/CAN awake for ~1 minute after engine-off.
     // We expose that as a separate state and do not deep-sleep while frames
     // are still physically arriving.
@@ -94,3 +108,17 @@ void power_manager_loop(){
     }
 }
 String power_manager_state(){return state;}
+bool power_can_sleep_enabled(){return canSleepEnabled;}
+void power_set_can_sleep_enabled(bool enabled){
+    canSleepEnabled=enabled;
+    powerPrefs.putBool("canSleep", canSleepEnabled);
+    offlineSince=0;
+    if(!enabled){
+        state="BENCH TEST / DEEP SLEEP OFF";
+        display_set_backlight(true);
+        backlightOff=false;
+    }else{
+        state="ACTIVE / AUTO CAN";
+    }
+    Serial.printf("POWER: CAN sleep control %s\n", enabled?"ENABLED":"DISABLED (BENCH)");
+}
