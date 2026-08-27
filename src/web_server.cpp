@@ -19,11 +19,14 @@
 #include <WebServer.h>
 #include <Update.h>
 #include <SD_MMC.h>
+#include <Preferences.h>
 
 static WebServer server(80);
 
 static const char *WEB_USER = "admin";
-static const char *WEB_PASS = "bmw520xd";
+static Preferences webPrefs;
+static bool webAuthEnabled = false;
+static String webPassword;
 
 static bool rebootPending = false;
 static uint32_t rebootAt = 0;
@@ -174,9 +177,9 @@ small{color:var(--mut)}
 </div></section>
 
 <section id="firmware"><h2>AGGIORNAMENTO OTA</h2><div class="card">
-<p>Carica il file <b>firmware.bin</b> prodotto da PlatformIO.</p>
-<form id="otaForm"><input id="fw" type="file" accept=".bin" required><button class="btn ok" type="submit">AGGIORNA</button></form>
-<p><progress id="otaProgress" max="100" value="0"></progress></p><div id="otaMsg"></div>
+<p>Apri la pagina OTA dedicata. Durante il trasferimento non vengono eseguiti aggiornamenti periodici della dashboard.</p>
+<p><a class="btn ok" href="/ota">APRI AGGIORNAMENTO OTA</a></p>
+<small>Usa esclusivamente il file BIN prodotto dalla build BMW 520xd Monitor.</small>
 </div></section>
 
 
@@ -212,6 +215,12 @@ small{color:var(--mut)}
 <div class="controls"><button class="btn ok" id="saveAlarms">SALVA SOGLIE</button></div>
 </div></section>
 <section id="system"><h2>SISTEMA</h2><div class="card" id="sys"></div>
+<h2 style="margin-top:18px">ACCESSO WEB</h2><div class="card">
+<div id="securityState" class="row"></div>
+<div class="row"><span>Nuova password</span><input id="webPassword" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="minimo 8 caratteri"></div>
+<div class="controls"><button class="btn ok" id="enableAuth">ABILITA / CAMBIA PASSWORD</button><button class="btn danger" id="disableAuth">DISATTIVA PASSWORD</button></div>
+<small>Utente: admin. Senza password chiunque sia collegato alla rete del dispositivo può controllarlo.</small>
+</div>
 <div class="controls">
 <button class="btn" onclick="reboot()">RIAVVIA</button>
 <button class="btn danger" onclick="factoryReset()">FACTORY RESET</button>
@@ -410,45 +419,6 @@ async function clearCanCatalog(){
 }
 setInterval(refreshCan,2500);
 
-otaForm.onsubmit=e=>{
-e.preventDefault();
-const f=fw.files[0];
-if(!f){otaMsg.textContent='Seleziona firmware.bin';return}
-if(!f.name.toLowerCase().endsWith('.bin')){otaMsg.textContent='File non valido: seleziona firmware.bin';return}
-
-const fd=new FormData();
-fd.append('firmware',f,f.name);
-
-const x=new XMLHttpRequest();
-x.open('POST','/update',true);
-x.timeout=180000;
-
-otaProgress.value=0;
-otaMsg.textContent='Upload in corso... 0%';
-
-x.upload.onprogress=ev=>{
-  if(ev.lengthComputable){
-    const p=Math.round((ev.loaded/ev.total)*100);
-    otaProgress.value=p;
-    otaMsg.textContent='Upload in corso... '+p+'%';
-  }
-};
-
-x.onload=()=>{
-  if(x.status>=200&&x.status<300){
-    otaProgress.value=100;
-    otaMsg.textContent=x.responseText||'Aggiornamento completato. Riavvio...';
-  }else{
-    otaMsg.textContent='OTA fallita ('+x.status+'): '+(x.responseText||'errore sconosciuto');
-  }
-};
-
-x.onerror=()=>otaMsg.textContent='Errore di rete durante upload.';
-x.ontimeout=()=>otaMsg.textContent='Timeout OTA.';
-x.send(fd);
-};
-
-
 const metricNames={
 coolant:'Temperatura acqua',
 oil:'Temperatura olio',
@@ -506,8 +476,11 @@ async function loadAlarms(){let r=await fetch('/api/alarms');let j=await r.json(
 saveAlarms.addEventListener('click',async()=>{let body='coolant='+encodeURIComponent(limCool.value)+'&oil='+encodeURIComponent(limOil.value)+'&gearbox='+encodeURIComponent(limGear.value)+'&dpf='+encodeURIComponent(limDpf.value);await fetch('/api/alarms',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});});
 resetPeaks.addEventListener('click',async()=>{await fetch('/api/trip/reset-peaks',{method:'POST'});});
 cfgImport.addEventListener('click',async()=>{const f=cfgFile.files[0];if(!f)return;const t=await f.text();let r=await fetch('/api/config/import',{method:'POST',headers:{'Content-Type':'application/json'},body:t});alert(await r.text());});
+async function loadSecurity(){try{let r=await fetch('/api/security');let j=await r.json();securityState.innerHTML=row('Protezione',j.enabled?'ATTIVA':'DISATTIVATA');}catch(e){securityState.textContent='Stato non disponibile';}}
+enableAuth.addEventListener('click',async()=>{const p=webPassword.value;if(p.length<8){alert('La password deve contenere almeno 8 caratteri');return}let b='enabled=1&password='+encodeURIComponent(p);let r=await fetch('/api/security',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b});alert(await r.text());webPassword.value='';loadSecurity();});
+disableAuth.addEventListener('click',async()=>{if(!confirm('Disattivare la protezione web?'))return;let r=await fetch('/api/security',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'enabled=0'});alert(await r.text());loadSecurity();});
 async function tripRefresh(){let r=await fetch('/api/status');let j=await r.json();tripBox.innerHTML=row('Stato',j.trip_active?'ATTIVO':'FERMO')+row('Durata',j.trip_duration+' s')+row('Picco acqua',j.peak_coolant==null?'--':j.peak_coolant+' °C')+row('Picco olio',j.peak_oil==null?'--':j.peak_oil+' °C')+row('Picco turbo',j.peak_turbo==null?'--':j.peak_turbo+' bar');}
-loadAlarms();tripRefresh();setInterval(tripRefresh,1500);
+loadAlarms();loadSecurity();tripRefresh();setInterval(tripRefresh,1500);
 status();logs();setInterval(status,750);
 setInterval(drawHistory,10000);
 </script>
@@ -516,10 +489,19 @@ setInterval(drawHistory,10000);
 
 static bool auth()
 {
-    if (server.authenticate(WEB_USER, WEB_PASS)) return true;
+    if (!webAuthEnabled) return true;
+    if (webPassword.length() >= 8 && server.authenticate(WEB_USER, webPassword.c_str())) return true;
     server.requestAuthentication();
     return false;
 }
+
+static const char OTA_HTML[] PROGMEM = R"HTML(
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMW 520xd OTA</title><style>body{margin:0;background:#050607;color:#f4f6f8;font-family:Arial,sans-serif}main{max-width:560px;margin:auto;padding:24px}.card{background:#121518;border:1px solid #30363d;border-radius:10px;padding:20px}h1{color:#ffc400;font-size:22px}input,button,a{display:block;margin:16px 0;padding:12px;font-size:16px}button,a{background:#121518;color:#4dd17a;border:1px solid #4dd17a;border-radius:8px;text-decoration:none}small{color:#9aa4ae}</style></head>
+<body><main><h1>BMW 520xd — OTA RECOVERY</h1><div class="card"><p>Seleziona il firmware BIN e premi AGGIORNA. Non chiudere Chrome e non cambiare rete durante il trasferimento.</p>
+<form method="POST" action="/update" enctype="multipart/form-data"><input name="firmware" type="file" accept=".bin,application/octet-stream" required><button type="submit">AGGIORNA FIRMWARE</button></form>
+<small>La pagina resterà in attesa fino alla verifica completa. Il monitor si riavvierà automaticamente solo dopo un aggiornamento valido.</small></div><a href="/">Torna alla dashboard</a></main></body></html>
+)HTML";
 
 static String jsonEscape(const String &s)
 {
@@ -875,9 +857,50 @@ static void sendCanCatalog()
 
 void web_server_begin()
 {
+    webPrefs.begin("bmwweb", false);
+    webAuthEnabled = webPrefs.getBool("auth", false);
+    webPassword = webPrefs.getString("pass", "");
+    if (webAuthEnabled && webPassword.length() < 8) {
+        webAuthEnabled = false;
+        webPrefs.putBool("auth", false);
+    }
+
     server.on("/", HTTP_GET, []() {
         if (!auth()) return;
         server.send_P(200, "text/html; charset=utf-8", INDEX_HTML);
+    });
+
+    server.on("/ota", HTTP_GET, []() {
+        if (!auth()) return;
+        server.send_P(200, "text/html; charset=utf-8", OTA_HTML);
+    });
+
+    server.on("/api/security", HTTP_GET, []() {
+        if (!auth()) return;
+        server.send(200, "application/json", String("{\"enabled\":") + (webAuthEnabled ? "true" : "false") + "}");
+    });
+
+    server.on("/api/security", HTTP_POST, []() {
+        if (!auth()) return;
+        bool enabled = server.arg("enabled") == "1";
+        if (enabled) {
+            String password = server.arg("password");
+            if (password.length() < 8 || password.length() > 63) {
+                server.send(400, "text/plain", "Password non valida: usare da 8 a 63 caratteri");
+                return;
+            }
+            webPassword = password;
+            webPrefs.putString("pass", webPassword);
+            webAuthEnabled = true;
+            webPrefs.putBool("auth", true);
+            server.send(200, "text/plain", "Protezione attivata. Utente: admin");
+        } else {
+            webAuthEnabled = false;
+            webPassword = "";
+            webPrefs.putBool("auth", false);
+            webPrefs.remove("pass");
+            server.send(200, "text/plain", "Protezione web disattivata");
+        }
     });
 
     server.on("/api/discovery", HTTP_GET, []() {
@@ -1057,6 +1080,9 @@ void web_server_begin()
     server.on("/api/factory-reset", HTTP_POST, []() {
         if (!auth()) return;
         wifi_factory_reset();
+        webAuthEnabled = false;
+        webPassword = "";
+        webPrefs.clear();
         server.send(200, "text/plain", "Reset configurazione. Riavvio...");
         rebootPending = true;
         rebootAt = millis() + 600;
@@ -1107,7 +1133,7 @@ void web_server_begin()
             rebootAt = millis() + 1500;
         },
         []() {
-            if (!server.authenticate(WEB_USER, WEB_PASS)) return;
+            if (webAuthEnabled && !server.authenticate(WEB_USER, webPassword.c_str())) return;
 
             HTTPUpload &upload = server.upload();
 
