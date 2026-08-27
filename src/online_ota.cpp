@@ -140,7 +140,7 @@ bool online_ota_check(OnlineOtaInfo &info)
         info.error = "Impossibile aprire il server aggiornamenti";
         return false;
     }
-    int code = HTTP_ERROR_CONNECTION_REFUSED;
+    int code = HTTPC_ERROR_CONNECTION_REFUSED;
     for (int attempt = 0; attempt < 3 && code < 0; ++attempt) {
         code = http.GET();
         if (code < 0 && attempt < 2) delay(350);
