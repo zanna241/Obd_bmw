@@ -11,6 +11,8 @@
 #include "time_manager.h"
 #include "display_settings.h"
 #include "power_manager.h"
+#include "online_ota.h"
+#include "version.h"
 #include <cstring>
 
 static const int UI_W = 480;
@@ -58,6 +60,12 @@ static lv_obj_t *touchCoord = nullptr;
 static lv_obj_t *touchCountLabel = nullptr;
 static lv_obj_t *loggerStatus = nullptr;
 static lv_obj_t *powerModeStatus = nullptr;
+static lv_obj_t *otaOverlay = nullptr;
+static lv_obj_t *otaTitleLabel = nullptr;
+static lv_obj_t *otaMessageLabel = nullptr;
+static lv_obj_t *otaProgressBar = nullptr;
+static lv_obj_t *otaInstallButton = nullptr;
+static OnlineOtaInfo otaInfo;
 static lv_obj_t *wifiOverlay = nullptr;
 static lv_obj_t *displayOverlay = nullptr;
 static lv_obj_t *daySlider = nullptr;
@@ -338,6 +346,7 @@ static void build_diag(lv_obj_t *r);
 static void build_charts(lv_obj_t *r);
 
 static void build_settings_overlay(lv_obj_t *root);
+static void build_ota_overlay(lv_obj_t *root);
 static void build_display_overlay(lv_obj_t *root);
 static void build_touch_overlay(lv_obj_t *root);
 static void build_wifi_overlays(lv_obj_t *root);
@@ -705,6 +714,76 @@ static void power_mode_event(lv_event_t *e)
     }
 }
 
+static void ota_close_event(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if (otaOverlay) lv_obj_add_flag(otaOverlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void ota_progress(size_t received, size_t total, const char *phase)
+{
+    int percent = total ? (int)((received * 100ULL) / total) : 0;
+    if (otaProgressBar) lv_bar_set_value(otaProgressBar, percent, LV_ANIM_OFF);
+    if (otaMessageLabel) {
+        if (!strcmp(phase, "DOWNLOAD"))
+            lv_label_set_text_fmt(otaMessageLabel, "Download firmware... %d%%\n%u / %u byte", percent,
+                                  (unsigned)received, (unsigned)total);
+        else lv_label_set_text(otaMessageLabel, phase);
+    }
+    if (lv_disp) lv_refr_now(lv_disp);
+}
+
+static void ota_install_event(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if (otaInstallButton) lv_obj_add_flag(otaInstallButton, LV_OBJ_FLAG_HIDDEN);
+    if (otaProgressBar) {
+        lv_obj_clear_flag(otaProgressBar, LV_OBJ_FLAG_HIDDEN);
+        lv_bar_set_value(otaProgressBar, 0, LV_ANIM_OFF);
+    }
+    String error;
+    bool ok = online_ota_install(otaInfo, ota_progress, error);
+    if (!ok) {
+        lv_label_set_text_fmt(otaTitleLabel, "AGGIORNAMENTO FALLITO");
+        lv_label_set_text(otaMessageLabel, error.c_str());
+        if (otaProgressBar) lv_obj_add_flag(otaProgressBar, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(otaTitleLabel, "AGGIORNAMENTO COMPLETATO");
+    lv_label_set_text(otaMessageLabel, "Firmware verificato. Riavvio in corso...");
+    if (lv_disp) lv_refr_now(lv_disp);
+    delay(1200);
+    ESP.restart();
+}
+
+static void ota_check_event(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if (!otaOverlay && uiRoot) build_ota_overlay(uiRoot);
+    if (!otaOverlay) return;
+    lv_obj_clear_flag(otaOverlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(otaInstallButton, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(otaProgressBar, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(otaTitleLabel, "CONTROLLO AGGIORNAMENTI");
+    lv_label_set_text(otaMessageLabel, "Connessione al repository GitHub...");
+    if (lv_disp) lv_refr_now(lv_disp);
+
+    if (!online_ota_check(otaInfo)) {
+        lv_label_set_text(otaTitleLabel, "CONTROLLO NON RIUSCITO");
+        lv_label_set_text(otaMessageLabel, otaInfo.error.c_str());
+        return;
+    }
+    if (!otaInfo.updateAvailable) {
+        lv_label_set_text(otaTitleLabel, "FIRMWARE AGGIORNATO");
+        lv_label_set_text_fmt(otaMessageLabel, "Versione installata: %s\nNessun aggiornamento disponibile.", FW_VERSION);
+        return;
+    }
+    lv_label_set_text(otaTitleLabel, "NUOVO FIRMWARE DISPONIBILE");
+    lv_label_set_text_fmt(otaMessageLabel, "Installata: %s   Nuova: %s\n%s\nDimensione: %u byte\n\nScaricare e installare?",
+                          FW_VERSION, otaInfo.version.c_str(), otaInfo.notes.c_str(), (unsigned)otaInfo.size);
+    lv_obj_clear_flag(otaInstallButton, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void touch_test_event(lv_event_t *e)
 {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
@@ -712,28 +791,73 @@ static void touch_test_event(lv_event_t *e)
 }
 
 static lv_obj_t *menu_button(lv_obj_t *parent, const char *title,
-                             const char *subtitle, int y,
+                             const char *subtitle, int x, int y,
                              lv_event_cb_t cb)
 {
     lv_obj_t *b = lv_button_create(parent);
-    lv_obj_set_pos(b, 22, y);
-    lv_obj_set_size(b, 436, 48);
+    lv_obj_set_pos(b, x, y);
+    lv_obj_set_size(b, 212, 70);
     lv_obj_set_style_bg_color(b, PANEL(), 0);
     lv_obj_set_style_border_color(b, LINE(), 0);
     lv_obj_set_style_border_width(b, 1, 0);
     lv_obj_set_style_radius(b, 8, 0);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
 
-    L(b, title, 18, 4, &lv_font_montserrat_16, TEXT());
-    L(b, subtitle, 18, 25, &lv_font_montserrat_14, MUTED());
-
-    lv_obj_t *arrow = lv_label_create(b);
-    lv_label_set_text(arrow, ">");
-    lv_obj_set_style_text_font(arrow, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(arrow, YELLOW(), 0);
-    lv_obj_align(arrow, LV_ALIGN_RIGHT_MID, -16, 0);
+    lv_obj_t *titleLabel = L(b, title, 12, 8, &lv_font_montserrat_16, TEXT());
+    lv_obj_set_width(titleLabel, 188);
+    lv_label_set_long_mode(titleLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_t *subLabel = L(b, subtitle, 12, 36, &lv_font_montserrat_14, MUTED());
+    lv_obj_set_width(subLabel, 188);
+    lv_label_set_long_mode(subLabel, LV_LABEL_LONG_WRAP);
 
     return b;
+}
+
+static void build_ota_overlay(lv_obj_t *root)
+{
+    otaOverlay = lv_obj_create(root);
+    lv_obj_set_pos(otaOverlay, 0, 0);
+    lv_obj_set_size(otaOverlay, UI_W, UI_H);
+    lv_obj_set_style_bg_color(otaOverlay, BG(), 0);
+    lv_obj_set_style_bg_opa(otaOverlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(otaOverlay, 0, 0);
+    lv_obj_set_style_pad_all(otaOverlay, 0, 0);
+    lv_obj_clear_flag(otaOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    otaTitleLabel = L(otaOverlay, "AGGIORNAMENTO OTA", 20, 16,
+                      &lv_font_montserrat_20, YELLOW());
+    otaMessageLabel = L(otaOverlay, "Premere controllo aggiornamenti", 20, 58,
+                        &lv_font_montserrat_16, TEXT());
+    lv_obj_set_width(otaMessageLabel, 440);
+    lv_label_set_long_mode(otaMessageLabel, LV_LABEL_LONG_WRAP);
+
+    otaProgressBar = lv_bar_create(otaOverlay);
+    lv_obj_set_pos(otaProgressBar, 20, 205);
+    lv_obj_set_size(otaProgressBar, 440, 22);
+    lv_bar_set_range(otaProgressBar, 0, 100);
+    lv_obj_add_flag(otaProgressBar, LV_OBJ_FLAG_HIDDEN);
+
+    otaInstallButton = lv_button_create(otaOverlay);
+    lv_obj_set_pos(otaInstallButton, 20, 250);
+    lv_obj_set_size(otaInstallButton, 285, 50);
+    lv_obj_set_style_bg_color(otaInstallButton, GREEN(), 0);
+    lv_obj_add_event_cb(otaInstallButton, ota_install_event, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *installLabel = lv_label_create(otaInstallButton);
+    lv_label_set_text(installLabel, "SCARICA E INSTALLA");
+    lv_obj_set_style_text_color(installLabel, lv_color_hex(0x000000), 0);
+    lv_obj_center(installLabel);
+    lv_obj_add_flag(otaInstallButton, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *cancel = lv_button_create(otaOverlay);
+    lv_obj_set_pos(cancel, 320, 250);
+    lv_obj_set_size(cancel, 140, 50);
+    lv_obj_set_style_bg_color(cancel, PANEL2(), 0);
+    lv_obj_add_event_cb(cancel, ota_close_event, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *cancelLabel = lv_label_create(cancel);
+    lv_label_set_text(cancelLabel, "ANNULLA");
+    lv_obj_center(cancelLabel);
+
+    lv_obj_add_flag(otaOverlay, LV_OBJ_FLAG_HIDDEN);
 }
 
 
@@ -1152,8 +1276,8 @@ static void build_settings_overlay(lv_obj_t *root)
     lv_obj_set_style_pad_all(settingsOverlay, 0, 0);
     lv_obj_clear_flag(settingsOverlay, LV_OBJ_FLAG_SCROLLABLE);
 
-    L(settingsOverlay, "IMPOSTAZIONI", 22, 13, &lv_font_montserrat_24, TEXT());
-    L(settingsOverlay, "Swipe verso il basso per chiudere", 22, 43,
+    L(settingsOverlay, "IMPOSTAZIONI", 104, 13, &lv_font_montserrat_24, TEXT());
+    L(settingsOverlay, "Swipe verso il basso per chiudere", 104, 43,
       &lv_font_montserrat_14, MUTED());
 
     lv_obj_t *close = lv_button_create(settingsOverlay);
@@ -1170,16 +1294,16 @@ static void build_settings_overlay(lv_obj_t *root)
     menu_button(
         settingsOverlay,
         "WI-FI",
-        "Scansiona reti e configura connessione",
-        58,
+        "Rete e connessione",
+        18, 62,
         wifi_open_event
     );
 
     lv_obj_t *logger = menu_button(
         settingsOverlay,
         "DATA LOGGER",
-        "Abilita/disabilita registrazione dati",
-        109,
+        "Avvia o arresta log",
+        250, 62,
         logger_event
     );
 
@@ -1187,21 +1311,21 @@ static void build_settings_overlay(lv_obj_t *root)
     lv_label_set_text(loggerStatus, "DISATTIVATO");
     lv_obj_set_style_text_font(loggerStatus, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(loggerStatus, MUTED(), 0);
-    lv_obj_align(loggerStatus, LV_ALIGN_RIGHT_MID, -40, -12);
+    lv_obj_align(loggerStatus, LV_ALIGN_TOP_RIGHT, -8, 8);
 
     menu_button(
         settingsOverlay,
         "DISPLAY",
-        "Luminosita e tema giorno/notte",
-        160,
+        "Luminosita e tema",
+        18, 143,
         display_open_event
     );
 
     lv_obj_t *powerMode = menu_button(
         settingsOverlay,
         "DEEP SLEEP CAN",
-        "Disabilita per testare il monitor a banco",
-        211,
+        "Auto CAN o banco",
+        250, 143,
         power_mode_event
     );
 
@@ -1209,13 +1333,21 @@ static void build_settings_overlay(lv_obj_t *root)
     lv_label_set_text(powerModeStatus, power_can_sleep_enabled() ? "AUTO CAN" : "BANCO");
     lv_obj_set_style_text_font(powerModeStatus, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(powerModeStatus, power_can_sleep_enabled() ? GREEN() : YELLOW(), 0);
-    lv_obj_align(powerModeStatus, LV_ALIGN_RIGHT_MID, -40, -10);
+    lv_obj_align(powerModeStatus, LV_ALIGN_TOP_RIGHT, -8, 8);
+
+    menu_button(
+        settingsOverlay,
+        "AGGIORNAMENTO OTA",
+        "Controlla nuovo firmware",
+        18, 224,
+        ota_check_event
+    );
 
     menu_button(
         settingsOverlay,
         "RIAVVIA SCHEDA",
-        "Riavvio software completo; chiude prima il logger",
-        262,
+        "Riavvio software",
+        250, 224,
         reboot_board_event
     );
 
@@ -1310,6 +1442,8 @@ static void reset_gui_refs()
     alarmOverlay=nullptr; alarmTitle=nullptr; alarmMessage=nullptr;
     settingsOverlay=nullptr; touchOverlay=nullptr; touchDot=nullptr; touchCoord=nullptr;
     powerModeStatus=nullptr;
+    otaOverlay=nullptr; otaTitleLabel=nullptr; otaMessageLabel=nullptr;
+    otaProgressBar=nullptr; otaInstallButton=nullptr;
     touchCountLabel=nullptr; loggerStatus=nullptr; wifiOverlay=nullptr;
     displayOverlay=nullptr; daySlider=nullptr; nightSlider=nullptr;
     dayValueLabel=nullptr; nightValueLabel=nullptr; themeStatusLabel=nullptr;
