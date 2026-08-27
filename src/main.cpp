@@ -23,7 +23,7 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" BMW 520xd MONITOR V0.9.9.5 ONLINE OTA");
+    Serial.println(" BMW 520xd MONITOR V0.9.9.6 OTA TLS FIX");
     Serial.println(" TOUCH UPDATE / SHA256 VERIFY / OTA RECOVERY");
     Serial.println("======================================");
 
