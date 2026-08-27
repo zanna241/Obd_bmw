@@ -1,7 +1,12 @@
-# BMW 520xd Monitor V0.9.9.2 STABILITY
+# BMW 520xd Monitor V0.9.9.3 BENCH
 
 Release di stabilita derivata dalla V0.9.9.1 AUDIT e verificata sui log reali
 del 26 agosto 2026.
+
+La V0.9.9.3 aggiunge la modalita banco persistente: dal display touch o dalla
+pagina web si puo disabilitare il deep sleep automatico legato all'assenza CAN.
+In modalita banco la retroilluminazione resta attiva, mentre i dati motore non
+piu aggiornati continuano a essere invalidati per evitare valori falsi.
 
 ## Modifiche principali
 
