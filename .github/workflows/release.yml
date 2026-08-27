@@ -26,15 +26,15 @@ jobs:
       - name: Prepare artifacts
         run: |
           mkdir -p release
-          cp .pio/build/jc3248w535/firmware.bin release/BMW_520xd_MONITOR_V0992_STABILITY.bin
-          sha256sum release/BMW_520xd_MONITOR_V0992_STABILITY.bin > release/BMW_520xd_MONITOR_V0992_STABILITY.bin.sha256
+          cp .pio/build/jc3248w535/firmware.bin release/BMW_520xd_MONITOR_V0993_BENCH.bin
+          sha256sum release/BMW_520xd_MONITOR_V0993_BENCH.bin > release/BMW_520xd_MONITOR_V0993_BENCH.bin.sha256
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BMW_520xd_MONITOR_V0992_STABILITY
+          name: BMW_520xd_MONITOR_V0993_BENCH
           path: |
-            release/BMW_520xd_MONITOR_V0992_STABILITY.bin
-            release/BMW_520xd_MONITOR_V0992_STABILITY.bin.sha256
+            release/BMW_520xd_MONITOR_V0993_BENCH.bin
+            release/BMW_520xd_MONITOR_V0993_BENCH.bin.sha256
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
@@ -45,11 +45,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: BMW_520xd_MONITOR_V0992_STABILITY
+          name: BMW_520xd_MONITOR_V0993_BENCH
           path: release
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/BMW_520xd_MONITOR_V0992_STABILITY.bin
-            release/BMW_520xd_MONITOR_V0992_STABILITY.bin.sha256
+            release/BMW_520xd_MONITOR_V0993_BENCH.bin
+            release/BMW_520xd_MONITOR_V0993_BENCH.bin.sha256
