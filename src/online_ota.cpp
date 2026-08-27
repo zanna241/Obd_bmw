@@ -9,6 +9,7 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <mbedtls/sha256.h>
+#include <time.h>
 
 static const char *MANIFEST_URL =
     "https://raw.githubusercontent.com/zanna241/Obd_bmw/main/firmware/manifest.json";
@@ -60,6 +61,67 @@ static String httpFailure(const char *phase, int code)
     String detail = HTTPClient::errorToString(code);
     if (detail.length()) out += " " + detail;
     return out;
+}
+
+static bool waitForValidClock(uint32_t timeoutMs, String &error)
+{
+    const uint32_t started = millis();
+    time_t now = 0;
+    while (millis() - started < timeoutMs) {
+        time(&now);
+        if (now > 1700000000) return true;
+        delay(100);
+        yield();
+    }
+    error = "Ora Internet non sincronizzata";
+    return false;
+}
+
+static String tlsFailure(WiFiClientSecure &client, const char *phase, int httpCode)
+{
+    char detail[160] = {0};
+    const int tlsCode = client.lastError(detail, sizeof(detail));
+    String out = httpFailure(phase, httpCode);
+    if (tlsCode != 0) {
+        out += " TLS ";
+        out += String(tlsCode);
+        if (detail[0]) {
+            out += " ";
+            out += detail;
+        }
+    }
+    Serial.println(out);
+    return out;
+}
+
+// A failed TLS handshake leaves the socket unusable. Each retry must therefore
+// create a fresh secure client and HTTPClient rather than repeating GET() on
+// the same connection.
+static bool getManifestAttempt(String &body, String &error)
+{
+    WiFiClientSecure client;
+    client.setCACert(GITHUB_CA_BUNDLE);
+    client.setHandshakeTimeout(25);
+    client.setTimeout(15);
+
+    HTTPClient http;
+    http.setReuse(false);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setTimeout(15000);
+    if (!http.begin(client, MANIFEST_URL)) {
+        error = "Impossibile aprire il server aggiornamenti";
+        return false;
+    }
+
+    const int code = http.GET();
+    if (code != HTTP_CODE_OK) {
+        error = tlsFailure(client, "Manifest", code);
+        http.end();
+        return false;
+    }
+    body = http.getString();
+    http.end();
+    return true;
 }
 
 static String jsonString(const String &json, const char *key)
@@ -123,35 +185,22 @@ bool online_ota_check(OnlineOtaInfo &info)
         return false;
     }
 
+    if (!waitForValidClock(15000, info.error)) return false;
+
     IPAddress resolved;
     if (!WiFi.hostByName("raw.githubusercontent.com", resolved)) {
         info.error = "DNS GitHub non risolto";
         return false;
     }
 
-    WiFiClientSecure client;
-    client.setCACert(GITHUB_CA_BUNDLE);
-    client.setHandshakeTimeout(20);
-    client.setTimeout(12);
-    HTTPClient http;
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    http.setTimeout(12000);
-    if (!http.begin(client, MANIFEST_URL)) {
-        info.error = "Impossibile aprire il server aggiornamenti";
-        return false;
+    String json;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        String attemptError;
+        if (getManifestAttempt(json, attemptError)) break;
+        info.error = attemptError;
+        if (attempt < 2) delay(500 + attempt * 500);
     }
-    int code = HTTPC_ERROR_CONNECTION_REFUSED;
-    for (int attempt = 0; attempt < 3 && code < 0; ++attempt) {
-        code = http.GET();
-        if (code < 0 && attempt < 2) delay(350);
-    }
-    if (code != HTTP_CODE_OK) {
-        info.error = httpFailure("Manifest", code);
-        http.end();
-        return false;
-    }
-    String json = http.getString();
-    http.end();
+    if (!json.length()) return false;
 
     info.version = jsonString(json, "version");
     info.build = jsonString(json, "build");
@@ -175,6 +224,7 @@ bool online_ota_install(const OnlineOtaInfo &info, OnlineOtaProgress progress, S
     error = "";
     if (!info.valid || !info.updateAvailable) { error = "Aggiornamento non valido"; return false; }
     if (!wifi_connected()) { error = "Wi-Fi Internet non connesso"; return false; }
+    if (!waitForValidClock(15000, error)) return false;
     if (logger_active()) logger_stop();
 
     WiFiClientSecure client;
@@ -186,7 +236,7 @@ bool online_ota_install(const OnlineOtaInfo &info, OnlineOtaProgress progress, S
     http.setTimeout(15000);
     if (!http.begin(client, info.url)) { error = "Connessione download fallita"; return false; }
     int code = http.GET();
-    if (code != HTTP_CODE_OK) { error = httpFailure("Download", code); http.end(); return false; }
+    if (code != HTTP_CODE_OK) { error = tlsFailure(client, "Download", code); http.end(); return false; }
     int announced = http.getSize();
     if (announced > 0 && (size_t)announced != info.size) {
         error = "Dimensione download diversa dal manifest"; http.end(); return false;
