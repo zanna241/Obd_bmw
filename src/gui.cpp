@@ -85,7 +85,7 @@ static lv_obj_t *dpfRegenValue=nullptr,*dpfEgt1Value=nullptr,*dpfEgt2Value=nullp
 static lv_obj_t *dpfDiffValue=nullptr,*dpfTriggerValue=nullptr,*dpfSootValue=nullptr;
 static lv_obj_t *dpfAshValue=nullptr,*dpfAvgDistanceValue=nullptr,*dpfEgt3Value=nullptr,*dpfNoxValue=nullptr,*dpfLambdaValue=nullptr;
 static lv_obj_t *gearValue=nullptr,*gearOilValue=nullptr,*gearSlipValue=nullptr,*gearLockValue=nullptr;
-static lv_obj_t *diagCanValue=nullptr,*diagDdeValue=nullptr,*diagEgsValue=nullptr;
+static lv_obj_t *diagCanValue=nullptr,*diagDdeValue=nullptr,*diagEgsValue=nullptr,*diagScannerValue=nullptr;
 static lv_obj_t *liveVal[6]={}, *livePeak[6]={};
 static lv_obj_t *historyChart=nullptr; static lv_chart_series_t *historyCool=nullptr,*historyOil=nullptr;
 static lv_obj_t *wifiListBox = nullptr;
@@ -622,16 +622,25 @@ static void build_live(lv_obj_t *r)
     pages[PAGE_LIVE]=p;
 }
 
+static void diag_scanner_event(lv_event_t *e)
+{
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(!can_readonly_scan_active()&&!can_bmw_extended_scan_active())can_start_bmw_extended_scan();
+}
+
 static void build_diag(lv_obj_t *r)
 {
     lv_obj_t *p = page(r);
     L(p, "DIAGNOSTICA SISTEMA", 16, 11, &lv_font_montserrat_16, YELLOW());
-    lv_obj_t *b = B(p, 14, 42, 452, 205);
-    row(b, "Display", "OK", 18);
-    row(b, "Touch", "OK", 55);
-    diagCanValue = row(b, "Interfaccia CAN", "da testare", 92);
-    diagDdeValue = row(b, "DDE / motore", "non interrogata", 129);
-    diagEgsValue = row(b, "EGS / cambio", "profilo BMW atteso", 166);
+    lv_obj_t *b = B(p, 14, 40, 452, 151);
+    diagCanValue = row(b, "Interfaccia CAN", "da testare", 12);
+    diagDdeValue = row(b, "DDE / motore", "non interrogata", 48);
+    diagEgsValue = row(b, "EGS / cambio", "non interrogata", 84);
+    diagScannerValue = row(b, "Scanner BMW", "pronto", 120);
+    lv_obj_t *scan=lv_button_create(p);lv_obj_set_pos(scan,14,201);lv_obj_set_size(scan,452,48);
+    lv_obj_set_style_bg_color(scan,PANEL(),0);lv_obj_set_style_border_color(scan,YELLOW(),0);lv_obj_set_style_border_width(scan,2,0);
+    lv_obj_add_event_cb(scan,diag_scanner_event,LV_EVENT_CLICKED,nullptr);
+    lv_obj_t *sl=L(scan,"AVVIA SCANNER BMW READ-ONLY",0,0,&lv_font_montserrat_16,YELLOW());lv_obj_center(sl);
     pages[PAGE_DIAG] = p;
 }
 
@@ -1459,7 +1468,7 @@ static void reset_gui_refs()
     dpfAshValue=dpfAvgDistanceValue=dpfEgt3Value=dpfNoxValue=dpfLambdaValue=nullptr;
     gearValue=gearOilValue=gearSlipValue=gearLockValue=nullptr;
     for(int i=0;i<6;i++){liveVal[i]=livePeak[i]=nullptr;} historyChart=nullptr; historyCool=historyOil=nullptr;
-    diagCanValue=diagDdeValue=diagEgsValue=nullptr;
+    diagCanValue=diagDdeValue=diagEgsValue=diagScannerValue=nullptr;
     settingsOpen=false; touchTestOpen=false; touchWasPressed=false;
 }
 
@@ -1652,7 +1661,11 @@ static void update_live_values()
                 label_text_if_changed(diagCanValue,b);
             }
             if(diagDdeValue)label_text_if_changed(diagDdeValue,v.ddeDetected?"DDE 7E8 OK":"nessuna risposta");
-            if(diagEgsValue)if(diagEgsValue){String x="SCAN 0x"+String(can_readonly_scan_response_mask(),HEX);label_text_if_changed(diagEgsValue,x.c_str());}
+            if(diagEgsValue)label_text_if_changed(diagEgsValue,v.egsDetected?"EGS 0x18 OK":"nessuna risposta");
+            if(diagScannerValue){
+                String x=can_bmw_extended_scan_active()?String("in corso ")+String(can_bmw_scanner_progress())+"%":can_bmw_extended_scan_result();
+                label_text_if_changed(diagScannerValue,x.c_str());
+            }
             break;
 
         default: break;
