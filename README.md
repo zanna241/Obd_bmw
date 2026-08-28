@@ -1,4 +1,4 @@
-# BMW 520xd Monitor V0.9.9.5 ONLINE OTA
+# BMW 520xd Monitor V0.9.9.8 DIAGNOSTIC SCANNER
 
 Release di stabilita derivata dalla V0.9.9.1 AUDIT e verificata sui log reali
 del 26 agosto 2026.
@@ -13,7 +13,10 @@ compatibile con Chrome su iPhone e priva del polling della dashboard durante il
 trasferimento. Elimina inoltre la password fissa: la protezione web si configura
 per dispositivo e puo essere disattivata consapevolmente.
 
-La V0.9.9.5 aggiunge il controllo aggiornamenti direttamente dal display touch.
+La V0.9.9.6 rende affidabile il controllo aggiornamenti HTTPS sulle diverse catene TLS usate dagli edge GitHub e mostra errori di rete dettagliati.
+La V0.9.9.8 trasforma la discovery BMW 6F1 in uno scanner diagnostico read-only:
+inventario DDE, EGS, GWS e KOMBI, ISO-TP BMW extended anche multiframe e lettura
+dei DID UDS standard F190 (VIN), F187 (numero ricambio) e F189 (software).
 La schermata IMPOSTAZIONI usa ora una griglia 2 x 3 con pulsanti piu grandi.
 Il dispositivo legge il manifest pubblico GitHub, chiede conferma prima del
 download, mostra l'avanzamento, verifica dimensione e SHA-256 e riavvia solo
