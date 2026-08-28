@@ -135,10 +135,10 @@ small{color:var(--mut)}
 <div class="controls">
 <button class="btn" onclick="refreshDiscovery()">AGGIORNA</button>
 <button class="btn" id="scanBtn" onclick="scanEcus()">SCAN OBD READ-ONLY</button>
-<button class="btn" id="bmwScanBtn" onclick="scanBmwExt()">BMW EXT 6F1 READ-ONLY</button>
+<button class="btn" id="bmwScanBtn" onclick="scanBmwExt()">SCANNER BMW COMPLETO</button>
 <span id="scanMsg"><small>Pronto</small></span>
 </div>
-<small>OBD: TesterPresent 7E0..7E7. BMW EXT: source F1 / CAN 6F1 verso 12 DDE, 18 EGS, 5E GWS, 60 KOMBI. Solo UDS 3E 00: nessun coding, reset, routine o comando attuatore.</small>
+<small>Scanner BMW read-only: source F1 / CAN 6F1 verso 12 DDE, 18 EGS, 5E GWS, 60 KOMBI; identifica VIN, ricambio e software tramite DID standard UDS. Nessun coding, reset, cancellazione DTC, routine o comando attuatore.</small>
 </div>
 <h2 style="margin-top:18px">MARCA EVENTI NEL LOG</h2>
 <div class="card">
@@ -334,7 +334,8 @@ async function refreshDiscovery(){
  const r=await fetch('/api/discovery'); const j=await r.json();
  discoveryStats.innerHTML=
    row('ID osservati',j.ids)+row('ID passivi',j.passive_ids)+row('Frame passivi',j.passive_frames)+
-   row('OBD scan',j.scan_active?'IN CORSO':j.scan_result)+row('OBD mask',j.scan_mask)+row('BMW EXT scan',j.bmw_scan_active?'IN CORSO':j.bmw_scan_result)+row('BMW EXT mask',j.bmw_scan_mask);
+   row('OBD scan',j.scan_active?'IN CORSO':j.scan_result)+row('OBD mask',j.scan_mask)+row('Scanner BMW',j.bmw_scan_active?('IN CORSO '+j.bmw_scan_progress+'%'):j.bmw_scan_result)+row('BMW mask',j.bmw_scan_mask)+
+   j.bmw_ecus.map(e=>row(e.name+' 0x'+e.address,e.present?('PRESENTE | VIN '+(e.vin||'--')+' | HW '+(e.part||'--')+' | SW '+(e.software||'--')):'nessuna risposta')).join('');
  discoveryTable.innerHTML=j.entries.map(e=>
    `<tr><td>${e.id}</td><td>${e.count}</td><td>${e.avg_ms.toFixed(2)}</td><td><code>${e.last}</code></td><td>${e.changes.join(' / ')}</td></tr>`
  ).join('')||'<tr><td colspan="5">Nessun frame</td></tr>';
@@ -370,7 +371,7 @@ async function scanBmwExt(){
  const b=document.getElementById('bmwScanBtn'),m=document.getElementById('scanMsg');
  if(scanUiActive)return;
  scanUiActive=true;
- if(b)b.disabled=true; if(m)m.innerHTML='<small>BMW Extended scan 6F1 in corso...</small>';
+ if(b)b.disabled=true; if(m)m.innerHTML='<small>Scanner BMW read-only in corso: identificazione DDE, EGS, GWS e KOMBI...</small>';
  try{
    const r=await fetch('/api/diag/bmw-ext-scan',{method:'POST'});
    const t=await r.text();
@@ -383,7 +384,7 @@ async function scanBmwExt(){
  setTimeout(async()=>{
    scanUiActive=false; if(b)b.disabled=false;
    await status(); await refreshDiscovery(); await refreshCan();
- },2600);
+ },22000);
 }
 async function markEvent(label){
  const r=await fetch('/api/logger/marker?label='+encodeURIComponent(label),{method:'POST'});
@@ -801,6 +802,14 @@ static void sendDiscovery()
     j += ",\"bmw_scan_active\":" + String(can_bmw_extended_scan_active() ? "true" : "false");
     j += ",\"bmw_scan_mask\":\"0x" + String(can_bmw_extended_scan_response_mask(), HEX) + "\"";
     j += ",\"bmw_scan_result\":\"" + jsonEscape(can_bmw_extended_scan_result()) + "\"";
+    j += ",\"bmw_scan_progress\":" + String(can_bmw_scanner_progress());
+    j += ",\"bmw_ecus\":[";
+    for(int i=0;i<can_bmw_scanner_ecu_count();++i){
+        BmwScannerEcuInfo e;if(!can_bmw_scanner_ecu_get(i,e))continue;if(i)j+=",";
+        j += "{\"address\":\""+String(e.address,HEX)+"\",\"name\":\""+jsonEscape(e.name)+"\",\"present\":"+String(e.present?"true":"false");
+        j += ",\"vin\":\""+jsonEscape(e.vin)+"\",\"part\":\""+jsonEscape(e.partNumber)+"\",\"software\":\""+jsonEscape(e.softwareVersion)+"\",\"last\":\""+jsonEscape(e.lastResponse)+"\"}";
+    }
+    j += "]";
     j += ",\"entries\":[";
 
     for (int i = 0; i < discovery_count(); ++i) {
@@ -922,7 +931,7 @@ void web_server_begin()
         if (!auth()) return;
         if (can_readonly_scan_active() || can_bmw_extended_scan_active()) { server.send(409,"text/plain","Una scansione diagnostica e gia in corso"); return; }
         can_start_bmw_extended_scan();
-        server.send(200,"text/plain","BMW EXT avviato: 6F1 -> 12,18,5E,60; TesterPresent read-only");
+        server.send(200,"text/plain","Scanner BMW avviato: inventario read-only DDE, EGS, GWS e KOMBI");
     });
 
     server.on("/api/logger/marker", HTTP_POST, []() {

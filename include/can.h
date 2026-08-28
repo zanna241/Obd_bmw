@@ -53,3 +53,17 @@ void can_start_bmw_extended_scan();
 bool can_bmw_extended_scan_active();
 uint8_t can_bmw_extended_scan_response_mask();
 String can_bmw_extended_scan_result();
+
+struct BmwScannerEcuInfo {
+    uint8_t address;
+    bool present;
+    String name;
+    String vin;
+    String partNumber;
+    String softwareVersion;
+    String lastResponse;
+};
+
+uint8_t can_bmw_scanner_progress();
+int can_bmw_scanner_ecu_count();
+bool can_bmw_scanner_ecu_get(int index, BmwScannerEcuInfo &out);

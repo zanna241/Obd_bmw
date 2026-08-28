@@ -38,9 +38,26 @@ static const char *bmwTargetNames[]={"DDE/DME","EGS/ZF8","GWS","KOMBI"};
 static constexpr uint8_t BMW_TARGET_COUNT=sizeof(bmwTargets)/sizeof(bmwTargets[0]);
 static bool bmwExtScan=false;
 static uint8_t bmwExtScanIndex=0;
+static uint8_t bmwExtRequestIndex=0;
 static uint8_t bmwExtScanMask=0;
 static uint32_t bmwExtScanLastMs=0;
+static bool bmwExtWaiting=false;
 static String bmwExtScanResult="non eseguita";
+
+static BmwScannerEcuInfo bmwScannerInfo[BMW_TARGET_COUNT];
+static const uint16_t bmwReadDids[]={0x0000,0xF190,0xF187,0xF189};
+static constexpr uint8_t BMW_READ_COUNT=sizeof(bmwReadDids)/sizeof(bmwReadDids[0]);
+
+struct BmwExtIsoTpSession {
+    bool active=false;
+    uint8_t source=0;
+    uint16_t expected=0;
+    uint16_t used=0;
+    uint8_t nextSeq=1;
+    uint32_t lastMs=0;
+    uint8_t data[256];
+};
+static BmwExtIsoTpSession bmwExtIso;
 
 static int bmw_target_index(uint8_t addr){
     for(uint8_t i=0;i<BMW_TARGET_COUNT;i++) if(bmwTargets[i]==addr) return i;
@@ -174,8 +191,53 @@ static bool send_bmw_extended_tester_present(uint8_t target){
     return ok;
 }
 
+static bool send_bmw_extended_did(uint8_t target,uint16_t did){
+    uint8_t d[8]={target,0x03,0x22,(uint8_t)(did>>8),(uint8_t)did,0,0,0};
+    bool ok=send_can(BMW_TESTER_CAN_ID,d,8);
+    if(ok){
+        char b[72];snprintf(b,sizeof(b),"BMW SCAN TX %02X 22%04X",target,did);lastStatus=b;
+    }
+    return ok;
+}
+
+static void send_bmw_extended_flow_control(uint8_t target){
+    uint8_t d[8]={target,0x30,0x00,0x00,0,0,0,0};
+    send_can(BMW_TESTER_CAN_ID,d,8);
+}
+
+static String scanner_value(const uint8_t *data,uint16_t len){
+    while(len && (data[len-1]==0 || data[len-1]==0xFF || data[len-1]==' ')) len--;
+    if(!len) return "";
+    bool printable=true;
+    for(uint16_t i=0;i<len;i++) if(data[i]<32 || data[i]>126){printable=false;break;}
+    String out;
+    if(printable){for(uint16_t i=0;i<len;i++)out+=(char)data[i];return out;}
+    char b[4];
+    for(uint16_t i=0;i<len;i++){if(i)out+=' ';snprintf(b,sizeof(b),"%02X",data[i]);out+=b;}
+    return out;
+}
+
+static void decode_bmw_extended_payload(uint8_t source,const uint8_t *p,uint16_t n){
+    int idx=bmw_target_index(source);if(idx<0||!bmwExtScan||n<1)return;
+    BmwScannerEcuInfo &info=bmwScannerInfo[idx];
+    info.present=true;bmwExtScanMask|=(uint8_t)(1u<<idx);bmwExtWaiting=false;
+    if(source==0x12)vehicle_data().ddeDetected=true;
+    if(source==0x18)vehicle_data().egsDetected=true;
+    if(p[0]==0x7E){info.lastResponse="TesterPresent OK";}
+    else if(p[0]==0x62 && n>=3){
+        uint16_t did=((uint16_t)p[1]<<8)|p[2];String value=scanner_value(p+3,n-3);
+        if(did==0xF190)info.vin=value;
+        else if(did==0xF187)info.partNumber=value;
+        else if(did==0xF189)info.softwareVersion=value;
+        info.lastResponse="DID "+String(did,HEX)+" = "+value;
+    }else if(p[0]==0x7F && n>=3){
+        info.lastResponse="NRC 0x"+String(p[2],HEX)+" per SID 0x"+String(p[1],HEX);
+    }else info.lastResponse="Risposta SID 0x"+String(p[0],HEX);
+    logger_mark_event("BMW_SCANNER_RESP target=0x"+String(source,HEX)+" "+info.lastResponse);
+}
+
 static void observe_bmw_extended_response(uint32_t id,const twai_message_t &m){
-    if(!bmwExtScan || id<0x600 || id>0x6FF || m.data_length_code<4) return;
+    if(!bmwExtScan || id<0x600 || id>0x6FF || m.data_length_code<3) return;
     uint8_t source=(uint8_t)(id & 0xFF);
     int idx=bmw_target_index(source);
     if(idx<0) return;
@@ -183,18 +245,24 @@ static void observe_bmw_extended_response(uint32_t id,const twai_message_t &m){
     // BMW Extended 11-bit addressing: response first byte must target tester F1.
     if(m.data[0]!=BMW_TESTER_ADDR) return;
 
-    uint8_t pci=m.data[1];
-    if((pci & 0xF0)==0x00){
-        uint8_t len=pci & 0x0F;
-        if(len<1 || (uint8_t)(len+2)>m.data_length_code) return;
-        uint8_t sid=m.data[2];
-        // 7E = positive TesterPresent response. 7F 3E NRC also proves presence.
-        if(sid==0x7E || (sid==0x7F && len>=2 && m.data[3]==0x3E)){
-            bmwExtScanMask |= (uint8_t)(1u<<idx);
-            logger_mark_event("BMW_EXT_RESP target=0x"+String(source,HEX)+
-                              " id=0x"+String(id,HEX)+
-                              " sid=0x"+String(sid,HEX));
-        }
+    uint8_t pci=m.data[1],type=pci>>4;
+    if(type==0x0){uint8_t len=pci&0x0F;if(len&&len+2<=m.data_length_code)decode_bmw_extended_payload(source,&m.data[2],len);return;}
+    if(type==0x1){
+        uint16_t expected=((uint16_t)(pci&0x0F)<<8)|m.data[2];
+        if(expected>sizeof(bmwExtIso.data))return;
+        bmwExtIso=BmwExtIsoTpSession();bmwExtIso.active=true;bmwExtIso.source=source;
+        bmwExtIso.expected=expected;bmwExtIso.lastMs=millis();
+        uint8_t copy=min((int)expected,(int)m.data_length_code-3);
+        if(copy){memcpy(bmwExtIso.data,&m.data[3],copy);bmwExtIso.used=copy;}
+        send_bmw_extended_flow_control(source);return;
+    }
+    if(type==0x2 && bmwExtIso.active && bmwExtIso.source==source){
+        uint8_t seq=pci&0x0F;if(seq!=(bmwExtIso.nextSeq&0x0F)){bmwExtIso.active=false;return;}
+        bmwExtIso.nextSeq++;bmwExtIso.lastMs=millis();
+        uint16_t remaining=bmwExtIso.expected-bmwExtIso.used;
+        uint8_t copy=min((int)remaining,(int)m.data_length_code-2);
+        if(copy){memcpy(bmwExtIso.data+bmwExtIso.used,&m.data[2],copy);bmwExtIso.used+=copy;}
+        if(bmwExtIso.used>=bmwExtIso.expected){decode_bmw_extended_payload(source,bmwExtIso.data,bmwExtIso.expected);bmwExtIso.active=false;}
     }
 }
 
@@ -374,6 +442,7 @@ void can_update(){
     }
 
     for(auto &s:isoSessions)if(s.active&&now-s.lastMs>500)s.active=false;
+    if(bmwExtIso.active&&now-bmwExtIso.lastMs>900){bmwExtIso.active=false;bmwExtWaiting=false;}
 
     if(!discoverySent&&now>3000&&!isotp_busy()) discoverySent=send_mode01(0x00,true);
 
@@ -391,13 +460,16 @@ void can_update(){
             }
         }
     }else if(bmwExtScan){
-        // Read-only BMW presence scan. One target every 400 ms keeps the web,
-        // logger and RX draining responsive and avoids diagnostic bursts.
-        if(!recovering && !isotp_busy() && now-bmwExtScanLastMs>=400){
+        // Full read-only inventory. Each request waits for its response or a
+        // timeout; normal dashboard polling is paused but RX/web stay alive.
+        if(bmwExtWaiting && now-bmwExtScanLastMs>1000){bmwExtWaiting=false;bmwExtIso.active=false;}
+        if(!recovering && !isotp_busy() && !bmwExtWaiting && now-bmwExtScanLastMs>=120){
             if(bmwExtScanIndex<BMW_TARGET_COUNT){
-                uint8_t target=bmwTargets[bmwExtScanIndex++];
-                send_bmw_extended_tester_present(target);
-                bmwExtScanLastMs=now;
+                uint8_t target=bmwTargets[bmwExtScanIndex];
+                uint16_t did=bmwReadDids[bmwExtRequestIndex];
+                bool sent=did?send_bmw_extended_did(target,did):send_bmw_extended_tester_present(target);
+                if(sent){bmwExtWaiting=true;bmwExtScanLastMs=now;}
+                if(++bmwExtRequestIndex>=BMW_READ_COUNT){bmwExtRequestIndex=0;bmwExtScanIndex++;}
             }else{
                 bmwExtScan=false;
                 String found="";
@@ -409,7 +481,7 @@ void can_update(){
                 }
                 if(!found.length()) found="nessuno";
                 bmwExtScanResult="mask 0x"+String(bmwExtScanMask,HEX)+" : "+found;
-                logger_mark_event("BMW_EXT_SCAN_END "+bmwExtScanResult+" heap="+String(ESP.getFreeHeap()));
+                logger_mark_event("BMW_SCANNER_END "+bmwExtScanResult+" heap="+String(ESP.getFreeHeap()));
             }
         }
     }else if(!recovering&&!isotp_busy()&&now-lastRequestMs>=MIN_REQUEST_GAP_MS){
@@ -472,11 +544,24 @@ void can_start_bmw_extended_scan()
     if(readonlyScan || bmwExtScan) return;
     bmwExtScan=true;
     bmwExtScanIndex=0;
+    bmwExtRequestIndex=0;
     bmwExtScanMask=0;
+    bmwExtWaiting=false;
+    bmwExtIso=BmwExtIsoTpSession();
+    for(uint8_t i=0;i<BMW_TARGET_COUNT;i++){
+        bmwScannerInfo[i]=BmwScannerEcuInfo();bmwScannerInfo[i].address=bmwTargets[i];bmwScannerInfo[i].name=bmwTargetNames[i];
+    }
     bmwExtScanLastMs=millis()-500;
     bmwExtScanResult="scansione in corso";
-    logger_mark_event("BMW_EXT_SCAN_START source=F1 tx=6F1 targets=12,18,5E,60 TesterPresent");
+    logger_mark_event("BMW_SCANNER_START source=F1 tx=6F1 targets=12,18,5E,60 DID=F190,F187,F189 READ_ONLY");
 }
 bool can_bmw_extended_scan_active(){ return bmwExtScan; }
 uint8_t can_bmw_extended_scan_response_mask(){ return bmwExtScanMask; }
 String can_bmw_extended_scan_result(){ return bmwExtScanResult; }
+uint8_t can_bmw_scanner_progress(){
+    if(!bmwExtScan)return 100;
+    uint16_t done=(uint16_t)bmwExtScanIndex*BMW_READ_COUNT+bmwExtRequestIndex;
+    return (uint8_t)min(99,(int)(done*100/(BMW_TARGET_COUNT*BMW_READ_COUNT)));
+}
+int can_bmw_scanner_ecu_count(){return BMW_TARGET_COUNT;}
+bool can_bmw_scanner_ecu_get(int index,BmwScannerEcuInfo &out){if(index<0||index>=BMW_TARGET_COUNT)return false;out=bmwScannerInfo[index];return true;}
